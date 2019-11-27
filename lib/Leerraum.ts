@@ -1,4 +1,4 @@
-const linebreak = require('./typeset/linebreak').linebreak();
+// const linebreak = require('./typeset/linebreak').linebreak();
 
 // const PDFDocument = require('pdfkit');
 // const fs = require('fs');
@@ -8,6 +8,7 @@ const linebreak = require('./typeset/linebreak').linebreak();
 
 // const hypher_en = new Hypher(en);
 
+import linebreak from './typeset/linebreak';
 import * as T from './Types';
 import * as U from './Utils';
 import * as F from './typeset/Formatter';

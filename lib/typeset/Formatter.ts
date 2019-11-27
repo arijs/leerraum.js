@@ -6,8 +6,8 @@
  * All rights reserved.
  */
 
-const linebreak = require('./linebreak').linebreak();
-
+// const linebreak = require('./linebreak').linebreak();
+import linebreak from './linebreak';
 import * as T from '../Types';
 
 export function justify(measureText: (fontFamily: string, fontSize: number, text: string) => number, hypher, spans: T.Span[], options): T.Node[] {
