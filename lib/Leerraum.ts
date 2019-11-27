@@ -1,12 +1,12 @@
 const linebreak = require('./typeset/linebreak').linebreak();
 
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
+// const PDFDocument = require('pdfkit');
+// const fs = require('fs');
 
-const Hypher = require('hypher');
-const en = require('hyphenation.en-us');
+// const Hypher = require('hypher');
+// const en = require('hyphenation.en-us');
 
-const hypher_en = new Hypher(en);
+// const hypher_en = new Hypher(en);
 
 import * as T from './Types';
 import * as U from './Utils';
@@ -169,7 +169,7 @@ export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
             break;
         }
 
-        const nodes: T.Node[] = align(measures.measure, paragraph.hypher || hypher_en, paragraph.spans, null);
+        const nodes: T.Node[] = align(measures.measure, paragraph.hypher /*|| hypher_en */, paragraph.spans, null);
         const breaks = linebreak(nodes.map((n) => n.value), U.memoize(linelength), { tolerance: paragraph.tolerance || 10 });
         const lines: { ratio: number, nodes: T.Node[], position: number}[] = [];
         let lineStart = 0;
@@ -298,7 +298,7 @@ export function renderPolygon(points: T.Point[], style: T.Style): T.Renderer {
 
 // Misc --------------------------------------------------------------------------- 
 
-export function pdfMeasures(doc): T.Measures {
+export function pdfKitDocMeasures(doc): T.Measures {
     return {
         measure: (fontFamily, fontSize, text) => {
             return doc.font(fontFamily)._font.widthOfString(text, fontSize);
@@ -311,6 +311,25 @@ export function pdfMeasures(doc): T.Measures {
         glyphMetrics: (fontFamily, glyph) => {
             return {
                 leftBearing: doc.font(fontFamily)._font.font.layout(glyph).glyphs[0]._metrics.leftBearing
+            };
+        }
+    }
+}
+
+export function jsPdfDocMeasures(doc): T.Measures {
+    return {
+        measure: (fontFamily, fontSize, text) => {
+            const ff = String(fontFamily).split('\t');
+            return doc.setFont(ff[0], ff[1]).getStringUnitWidth(text) * fontSize;
+        },
+        fontMetrics: (fontFamily) => {
+            return {
+                ascender: 0
+            };
+        },
+        glyphMetrics: (fontFamily, glyph) => {
+            return {
+                leftBearing: 0
             };
         }
     }
@@ -415,29 +434,35 @@ export function renderToPDF(
     filename: string,
     format: T.Format,
     renderers: { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[],
-    background?: (page: number) => { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[]): void {
+    background?: (page: number) => { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[],
+    PDFDocument: any,
+    fs: any)
+: void {
 
-        const doc = new PDFDocument({
-            layout: 'portrait',
-            size: [format.width, format.height]
-        });
+    const doc = new PDFDocument({
+        layout: 'portrait',
+        size: [format.width, format.height]
+    });
 
-        const measures = pdfMeasures(doc);
+    const measures = pdfKitDocMeasures(doc);
+    const ws = fs.createWriteStream(filename);
 
-        doc.pipe(fs.createWriteStream(filename));
+    doc.pipe(ws);
 
-        let background_: ((page: number) => T.RenderNode[][]) | undefined = undefined;
+    let background_: ((page: number) => T.RenderNode[][]) | undefined = undefined;
 
-        if (background) {
-            background_ = (page) => {
-                return background(page).map((r) => r.renderer(measures, r.bboxes)[1]);
-            };
-        }
-
-        renderToPages(doc, format, renderers.map((r) => r.renderer(measures, r.bboxes)[1]), background_);
-
-        doc.end();
+    if (background) {
+        background_ = (page) => {
+            return background(page).map((r) => r.renderer(measures, r.bboxes)[1]);
+        };
     }
+
+    renderToPages(doc, format, renderers.map((r) => r.renderer(measures, r.bboxes)[1]), background_);
+
+    doc.end();
+
+    return ws;
+}
 
 export function withMargins(format: T.Format, marginTop: number, marginRight: number, marginBottom: number, marginLeft: number): T.Stream<T.BBox> {
     return (index) => {
