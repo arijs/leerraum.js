@@ -74,6 +74,12 @@ export type Node = {
     value: any
 }
 
+export type NodesLine = {
+    ratio: number,
+    nodes: Node[],
+    position: number
+}
+
 export type Measures = {
     measure: (fontFamily: string, fontSize: number, text: string) => number,
     fontMetrics: (fontFamily: string) => { ascender: number },

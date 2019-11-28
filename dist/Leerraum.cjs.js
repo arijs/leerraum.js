@@ -834,6 +834,57 @@ function vertically(renderers) {
     };
 }
 // Renderers ---------------------------------------------------------------------- 
+function renderNodesLine(measures, paragraph, width) {
+    var linelength = function (line) {
+        var text_y = (line + 1) * paragraph.leading;
+        var indent = 0;
+        indent += paragraph.leftIndentation
+            ? paragraph.leftIndentation(line) : 0;
+        indent += paragraph.rightIndentation
+            ? paragraph.rightIndentation(line) : 0;
+        return width(text_y, line) - indent;
+    };
+    var align;
+    switch (paragraph.align) {
+        case 'left':
+        default:
+            align = left;
+            break;
+        case 'center':
+            align = center;
+            break;
+        case 'justify':
+            align = justify;
+            break;
+    }
+    var nodes = align(measures.measure, paragraph.hypher /*|| hypher_en */, paragraph.spans, null);
+    var breaks = linebreak(nodes.map(function (n) { return n.value; }), memoize(linelength), { tolerance: paragraph.tolerance || 10 });
+    var lines = [];
+    var lineStart = 0;
+    // typeset: Iterate through the line breaks, and split the nodes at the
+    // correct point.
+    for (var i = 1; i < breaks.length; i += 1) {
+        var point = breaks[i].position;
+        var r = breaks[i].ratio;
+        for (var j = lineStart; j < nodes.length; j += 1) {
+            // typeset: After a line break, we skip any nodes unless they are boxes or forced breaks.
+            var nValue = nodes[j].value;
+            if (nValue.type === 'box' ||
+                (nValue.type === 'penalty' &&
+                    nValue.penalty === -linebreak.infinity)) {
+                lineStart = j;
+                break;
+            }
+        }
+        lines.push({
+            ratio: r,
+            nodes: nodes.slice(lineStart, point + 1),
+            position: point
+        });
+        lineStart = point;
+    }
+    return lines;
+}
 // TODO: letter spacing
 function renderParagraph(paragraph) {
     return function (measures, bboxes) {
@@ -854,43 +905,55 @@ function renderParagraph(paragraph) {
             }
             return [null, index];
         };
-        var linelength = function (line) {
-            var _a = getBBoxForTextY(paragraph.leading, text_y + (line + 1) * paragraph.leading), bbox = _a[0], _ = _a[1];
-            var indent = (paragraph.leftIndentation ? paragraph.leftIndentation(line) : 0) +
+        /*
+        const linelength = (line) => {
+            const [bbox, _] = getBBoxForTextY(paragraph.leading, text_y + (line + 1) * paragraph.leading);
+            const indent = (paragraph.leftIndentation ? paragraph.leftIndentation(line) : 0) +
                 (paragraph.rightIndentation ? paragraph.rightIndentation(line) : 0);
             return bbox !== null ? bbox.width - indent : null;
         };
-        var align;
+        let align;
+
         switch (paragraph.align) {
-            case 'left':
-            default:
-                align = left;
-                break;
-            case 'center':
-                align = center;
-                break;
-            case 'justify':
-                align = justify;
-                break;
+        case 'left':
+        default:
+            align = F.left;
+            break;
+        case 'center':
+            align = F.center;
+            break;
+        case 'justify':
+            align = F.justify;
+            break;
         }
-        var nodes = align(measures.measure, paragraph.hypher /*|| hypher_en */, paragraph.spans, null);
-        var breaks = linebreak(nodes.map(function (n) { return n.value; }), memoize(linelength), { tolerance: paragraph.tolerance || 10 });
-        var lines = [];
-        var lineStart = 0;
+
+        const nodes: T.Node[] = align(measures.measure, paragraph.hypher, paragraph.spans, null);
+        const breaks = linebreak(nodes.map((n) => n.value), U.memoize(linelength), { tolerance: paragraph.tolerance || 10 });
+        const lines: T.NodesLine[] = [];
+        let lineStart = 0;
+
         // typeset: Iterate through the line breaks, and split the nodes at the
         // correct point.
-        for (var i = 1; i < breaks.length; i += 1) {
-            var point = breaks[i].position, r = breaks[i].ratio;
-            for (var j = lineStart; j < nodes.length; j += 1) {
+        for (let i = 1; i < breaks.length; i += 1) {
+            let point = breaks[i].position, r = breaks[i].ratio;
+            
+            for (let j = lineStart; j < nodes.length; j += 1) {
                 // typeset: After a line break, we skip any nodes unless they are boxes or forced breaks.
                 if (nodes[j].value.type === 'box' || (nodes[j].value.type === 'penalty' && nodes[j].value.penalty === -linebreak.infinity)) {
                     lineStart = j;
                     break;
                 }
             }
-            lines.push({ ratio: r, nodes: nodes.slice(lineStart, point + 1), position: point });
+
+            lines.push({ratio: r, nodes: nodes.slice(lineStart, point + 1), position: point});
             lineStart = point;
         }
+        // */
+        // text_y + (line + 1) * paragraph.leading
+        var lines = renderNodesLine(measures, paragraph, function (text_y) {
+            var _a = getBBoxForTextY(paragraph.leading, text_y), bbox = _a[0], _ = _a[1];
+            return bbox !== null ? bbox.width : NaN;
+        });
         y = 0;
         lines.forEach(function (line, lineIndex) {
             var _a;
@@ -1111,7 +1174,7 @@ function renderToPages(doc, format, layers, background) {
         }
     }
 }
-function renderToPDF(filename, format, renderers, background, PDFDocument, fs) {
+function renderToPDF(PDFDocument, fs, filename, format, renderers, background) {
     var doc = new PDFDocument({
         layout: 'portrait',
         size: [format.width, format.height]
@@ -1162,6 +1225,7 @@ exports.landscape = landscape;
 exports.pageBreak = pageBreak;
 exports.pdfKitDocMeasures = pdfKitDocMeasures;
 exports.renderColumns = renderColumns;
+exports.renderNodesLine = renderNodesLine;
 exports.renderParagraph = renderParagraph;
 exports.renderPolygon = renderPolygon;
 exports.renderTable = renderTable;

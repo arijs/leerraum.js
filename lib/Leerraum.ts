@@ -123,13 +123,82 @@ export function vertically(renderers: T.Renderer[]): T.Renderer {
 
 // Renderers ---------------------------------------------------------------------- 
 
+export function renderNodesLine(measures: T.Measures, paragraph: T.Paragraph, width: (text_y: number, line: number) => number): T.NodesLine[] {
+
+    const linelength = (line: number) => {
+        const text_y: number = (line + 1) * paragraph.leading;
+        let indent = 0;
+        indent += paragraph.leftIndentation
+            ? paragraph.leftIndentation(line) : 0;
+        indent += paragraph.rightIndentation
+            ? paragraph.rightIndentation(line) : 0;
+        return width(text_y, line) - indent;
+    };
+    let align: Function;
+
+    switch (paragraph.align) {
+    case 'left':
+    default:
+        align = F.left;
+        break;
+    case 'center':
+        align = F.center;
+        break;
+    case 'justify':
+        align = F.justify;
+        break;
+    }
+
+    const nodes: T.Node[] = align(
+        measures.measure,
+        paragraph.hypher /*|| hypher_en */,
+        paragraph.spans,
+        null
+    );
+    const breaks = linebreak(
+        nodes.map((n) => n.value),
+        U.memoize(linelength),
+        { tolerance: paragraph.tolerance || 10 }
+    );
+    const lines: T.NodesLine[] = [];
+    let lineStart = 0;
+
+    // typeset: Iterate through the line breaks, and split the nodes at the
+    // correct point.
+    for (let i = 1; i < breaks.length; i += 1) {
+        let point = breaks[i].position;
+        let r = breaks[i].ratio;
+        
+        for (let j = lineStart; j < nodes.length; j += 1) {
+            // typeset: After a line break, we skip any nodes unless they are boxes or forced breaks.
+            const nValue = nodes[j].value;
+            if (nValue.type === 'box' ||
+                (nValue.type === 'penalty' &&
+                nValue.penalty === -linebreak.infinity)
+            ) {
+                lineStart = j;
+                break;
+            }
+        }
+
+        lines.push({
+            ratio: r,
+            nodes: nodes.slice(lineStart, point + 1),
+            position: point
+        });
+        lineStart = point;
+    }
+
+    return lines;
+}
+
 // TODO: letter spacing
 export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
     return (measures, bboxes) => {
 
         let text_nodes: T.RenderNode[] = [];
         let text_y = 0;
-        let y;
+        let y: number;
         let old_bbox: T.BBox | null = null;
         let current_bbox, current_bbox_index;
         const rendered_bboxes: T.BBox[] = [];
@@ -149,48 +218,10 @@ export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
             return [null, index];
         }
 
-        const linelength = (line) => {
-            const [bbox, _] = getBBoxForTextY(paragraph.leading, text_y + (line + 1) * paragraph.leading);
-            const indent = (paragraph.leftIndentation ? paragraph.leftIndentation(line) : 0) + 
-                (paragraph.rightIndentation ? paragraph.rightIndentation(line) : 0);
-            return bbox !== null ? bbox.width - indent : null;
-        };
-        let align;
-
-        switch (paragraph.align) {
-        case 'left':
-        default:
-            align = F.left;
-            break;
-        case 'center':
-            align = F.center;
-            break;
-        case 'justify':
-            align = F.justify;
-            break;
-        }
-
-        const nodes: T.Node[] = align(measures.measure, paragraph.hypher /*|| hypher_en */, paragraph.spans, null);
-        const breaks = linebreak(nodes.map((n) => n.value), U.memoize(linelength), { tolerance: paragraph.tolerance || 10 });
-        const lines: { ratio: number, nodes: T.Node[], position: number}[] = [];
-        let lineStart = 0;
-
-        // typeset: Iterate through the line breaks, and split the nodes at the
-        // correct point.
-        for (let i = 1; i < breaks.length; i += 1) {
-            let point = breaks[i].position, r = breaks[i].ratio;
-            
-            for (let j = lineStart; j < nodes.length; j += 1) {
-                // typeset: After a line break, we skip any nodes unless they are boxes or forced breaks.
-                if (nodes[j].value.type === 'box' || (nodes[j].value.type === 'penalty' && nodes[j].value.penalty === -linebreak.infinity)) {
-                    lineStart = j;
-                    break;
-                }
-            }
-
-            lines.push({ratio: r, nodes: nodes.slice(lineStart, point + 1), position: point});
-            lineStart = point;
-        }
+        const lines = renderNodesLine(measures, paragraph, (text_y: number): number => {
+            const [bbox, _] = getBBoxForTextY(paragraph.leading, text_y);
+            return bbox !== null ? bbox.width : NaN;
+        });
 
         y = 0;
         lines.forEach(function (line, lineIndex) {
@@ -432,12 +463,12 @@ export function renderToPages(doc, format: T.Format, layers: T.RenderNode[][], b
 }
 
 export function renderToPDF(
+    PDFDocument: any,
+    fs: any,
     filename: string,
     format: T.Format,
     renderers: { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[],
-    background?: (page: number) => { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[],
-    PDFDocument: any,
-    fs: any)
+    background?: (page: number) => { bboxes: T.Stream<T.BBox>, renderer: T.Renderer}[])
 : void {
 
     const doc = new PDFDocument({
