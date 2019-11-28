@@ -123,7 +123,7 @@ export function vertically(renderers: T.Renderer[]): T.Renderer {
 
 // Renderers ---------------------------------------------------------------------- 
 
-export function renderNodesLine(measures: T.Measures, paragraph: T.Paragraph, width: (text_y: number, line: number) => number): T.NodesLine[] {
+export function paragraphToNodesLines(measures: T.Measures, paragraph: T.Paragraph, width: (text_y: number, line: number) => number): T.NodesLine[] {
 
     const linelength = (line: number) => {
         const text_y: number = (line + 1) * paragraph.leading;
@@ -192,13 +192,58 @@ export function renderNodesLine(measures: T.Measures, paragraph: T.Paragraph, wi
     return lines;
 }
 
+export function nodesLineToTextNodes(measures: T.Measures, line: T.NodesLine, x_start: number = 0, y_start: number = 0): T.RenderNode[] {
+    let text_nodes: T.RenderNode[] = [];
+    let x = 0;
+    let y = 0;
+    let x_offset = 0;
+
+    line.nodes.forEach(function (node, index, array) {
+        // workaround for pdfkit's blatant disregard of baselines :)
+        let asc = measures.fontMetrics(node.style.fontFamily).ascender;
+        let y_offset = -asc / 1000 * node.style.fontSize;
+
+        let x_ = x_start + x;
+        let y_ = y_start + y;
+
+        if (node.value.type === 'box') {
+            // try to left align glyph edges
+            if (x_ === 0) {
+                let leftBearing = node.value.value[0] ? measures.glyphMetrics(node.style.fontFamily, node.value.value[0]).leftBearing: 0;
+                x_offset = -leftBearing / 1000 * node.style.fontSize;
+            }
+
+            text_nodes.push({
+                type: 'text',
+                x: x_ + x_offset,
+                y: y_ + y_offset,
+                span: node.style,
+                text: node.value.value,
+            });
+            x += node.value.width;
+        } else if (node.value.type === 'glue') {
+            x += node.value.width + line.ratio * (line.ratio < 0 ? node.value.shrink : node.value.stretch);
+        } else if (node.value.type === 'penalty' && node.value.penalty === 100 && index === array.length - 1) {
+            text_nodes.push({
+                type: 'text',
+                x: x_ + x_offset,
+                y: y_ + y_offset,
+                span: node.style,
+                text: '-',
+            });
+        }
+    });
+
+    return text_nodes;
+}
+
 // TODO: letter spacing
 export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
     return (measures, bboxes) => {
 
         let text_nodes: T.RenderNode[] = [];
-        let text_y = 0;
-        let y: number;
+        let text_y: number = 0;
+        let y: number = 0;
         let old_bbox: T.BBox | null = null;
         let current_bbox, current_bbox_index;
         const rendered_bboxes: T.BBox[] = [];
@@ -218,15 +263,12 @@ export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
             return [null, index];
         }
 
-        const lines = renderNodesLine(measures, paragraph, (text_y: number): number => {
+        const lines = paragraphToNodesLines(measures, paragraph, (text_y: number): number => {
             const [bbox, _] = getBBoxForTextY(paragraph.leading, text_y);
             return bbox !== null ? bbox.width : NaN;
         });
 
-        y = 0;
         lines.forEach(function (line, lineIndex) {
-            let x = 0;
-            let x_offset = 0;
             let x_indent = paragraph.leftIndentation ? paragraph.leftIndentation(lineIndex) : 0;
 
             y += paragraph.leading;
@@ -240,40 +282,10 @@ export function renderParagraph(paragraph: T.Paragraph): T.Renderer {
 
             old_bbox = current_bbox;
 
-            line.nodes.forEach(function (node, index, array) {
-                // workaround for pdfkit's blatant disregard of baselines :)
-                let asc = measures.fontMetrics(node.style.fontFamily).ascender;
-                let y_offset = -asc / 1000 * node.style.fontSize;
+            const lineTextNodes: T.RenderNode[] = nodesLineToTextNodes(measures, line, current_bbox.x + x_indent, current_bbox.y + y);
 
-                let x_ = current_bbox.x + x, y_ = current_bbox.y + y;
+            text_nodes = text_nodes.concat(lineTextNodes);
 
-                if (node.value.type === 'box') {
-                    // try to left align glyph edges
-                    if (x === 0) {
-                        let leftBearing = node.value.value[0] ? measures.glyphMetrics(node.style.fontFamily, node.value.value[0]).leftBearing: 0;
-                        x_offset = -leftBearing / 1000 * node.style.fontSize;
-                    }
-
-                    text_nodes.push({
-                        type: 'text',
-                        x: x_ + x_offset + x_indent,
-                        y: y_ + y_offset,
-                        span: node.style,
-                        text: node.value.value,
-                    });
-                    x += node.value.width;
-                } else if (node.value.type === 'glue') {
-                    x += node.value.width + line.ratio * (line.ratio < 0 ? node.value.shrink : node.value.stretch);
-                } else if (node.value.type === 'penalty' && node.value.penalty === 100 && index === array.length - 1) {
-                    text_nodes.push({
-                        type: 'text',
-                        x: x_ + x_offset + x_indent,
-                        y: y_ + y_offset,
-                        span: node.style,
-                        text: '-',
-                    });
-                }
-            });
         });
 
         for (let index = 0; index < current_bbox_index; index++) {

@@ -834,7 +834,7 @@ function vertically(renderers) {
     };
 }
 // Renderers ---------------------------------------------------------------------- 
-function renderNodesLine(measures, paragraph, width) {
+function paragraphToNodesLines(measures, paragraph, width) {
     var linelength = function (line) {
         var text_y = (line + 1) * paragraph.leading;
         var indent = 0;
@@ -885,12 +885,55 @@ function renderNodesLine(measures, paragraph, width) {
     }
     return lines;
 }
+function nodesLineToTextNodes(measures, line, x_start, y_start) {
+    if (x_start === void 0) { x_start = 0; }
+    if (y_start === void 0) { y_start = 0; }
+    var text_nodes = [];
+    var x = 0;
+    var y = 0;
+    var x_offset = 0;
+    line.nodes.forEach(function (node, index, array) {
+        // workaround for pdfkit's blatant disregard of baselines :)
+        var asc = measures.fontMetrics(node.style.fontFamily).ascender;
+        var y_offset = -asc / 1000 * node.style.fontSize;
+        var x_ = x_start + x;
+        var y_ = y_start + y;
+        if (node.value.type === 'box') {
+            // try to left align glyph edges
+            if (x_ === 0) {
+                var leftBearing = node.value.value[0] ? measures.glyphMetrics(node.style.fontFamily, node.value.value[0]).leftBearing : 0;
+                x_offset = -leftBearing / 1000 * node.style.fontSize;
+            }
+            text_nodes.push({
+                type: 'text',
+                x: x_ + x_offset,
+                y: y_ + y_offset,
+                span: node.style,
+                text: node.value.value,
+            });
+            x += node.value.width;
+        }
+        else if (node.value.type === 'glue') {
+            x += node.value.width + line.ratio * (line.ratio < 0 ? node.value.shrink : node.value.stretch);
+        }
+        else if (node.value.type === 'penalty' && node.value.penalty === 100 && index === array.length - 1) {
+            text_nodes.push({
+                type: 'text',
+                x: x_ + x_offset,
+                y: y_ + y_offset,
+                span: node.style,
+                text: '-',
+            });
+        }
+    });
+    return text_nodes;
+}
 // TODO: letter spacing
 function renderParagraph(paragraph) {
     return function (measures, bboxes) {
         var text_nodes = [];
         var text_y = 0;
-        var y;
+        var y = 0;
         var old_bbox = null;
         var current_bbox, current_bbox_index;
         var rendered_bboxes = [];
@@ -905,60 +948,12 @@ function renderParagraph(paragraph) {
             }
             return [null, index];
         };
-        /*
-        const linelength = (line) => {
-            const [bbox, _] = getBBoxForTextY(paragraph.leading, text_y + (line + 1) * paragraph.leading);
-            const indent = (paragraph.leftIndentation ? paragraph.leftIndentation(line) : 0) +
-                (paragraph.rightIndentation ? paragraph.rightIndentation(line) : 0);
-            return bbox !== null ? bbox.width - indent : null;
-        };
-        let align;
-
-        switch (paragraph.align) {
-        case 'left':
-        default:
-            align = F.left;
-            break;
-        case 'center':
-            align = F.center;
-            break;
-        case 'justify':
-            align = F.justify;
-            break;
-        }
-
-        const nodes: T.Node[] = align(measures.measure, paragraph.hypher, paragraph.spans, null);
-        const breaks = linebreak(nodes.map((n) => n.value), U.memoize(linelength), { tolerance: paragraph.tolerance || 10 });
-        const lines: T.NodesLine[] = [];
-        let lineStart = 0;
-
-        // typeset: Iterate through the line breaks, and split the nodes at the
-        // correct point.
-        for (let i = 1; i < breaks.length; i += 1) {
-            let point = breaks[i].position, r = breaks[i].ratio;
-            
-            for (let j = lineStart; j < nodes.length; j += 1) {
-                // typeset: After a line break, we skip any nodes unless they are boxes or forced breaks.
-                if (nodes[j].value.type === 'box' || (nodes[j].value.type === 'penalty' && nodes[j].value.penalty === -linebreak.infinity)) {
-                    lineStart = j;
-                    break;
-                }
-            }
-
-            lines.push({ratio: r, nodes: nodes.slice(lineStart, point + 1), position: point});
-            lineStart = point;
-        }
-        // */
-        // text_y + (line + 1) * paragraph.leading
-        var lines = renderNodesLine(measures, paragraph, function (text_y) {
+        var lines = paragraphToNodesLines(measures, paragraph, function (text_y) {
             var _a = getBBoxForTextY(paragraph.leading, text_y), bbox = _a[0], _ = _a[1];
             return bbox !== null ? bbox.width : NaN;
         });
-        y = 0;
         lines.forEach(function (line, lineIndex) {
             var _a;
-            var x = 0;
-            var x_offset = 0;
             var x_indent = paragraph.leftIndentation ? paragraph.leftIndentation(lineIndex) : 0;
             y += paragraph.leading;
             text_y += paragraph.leading;
@@ -967,39 +962,8 @@ function renderParagraph(paragraph) {
                 y = paragraph.leading;
             }
             old_bbox = current_bbox;
-            line.nodes.forEach(function (node, index, array) {
-                // workaround for pdfkit's blatant disregard of baselines :)
-                var asc = measures.fontMetrics(node.style.fontFamily).ascender;
-                var y_offset = -asc / 1000 * node.style.fontSize;
-                var x_ = current_bbox.x + x, y_ = current_bbox.y + y;
-                if (node.value.type === 'box') {
-                    // try to left align glyph edges
-                    if (x === 0) {
-                        var leftBearing = node.value.value[0] ? measures.glyphMetrics(node.style.fontFamily, node.value.value[0]).leftBearing : 0;
-                        x_offset = -leftBearing / 1000 * node.style.fontSize;
-                    }
-                    text_nodes.push({
-                        type: 'text',
-                        x: x_ + x_offset + x_indent,
-                        y: y_ + y_offset,
-                        span: node.style,
-                        text: node.value.value,
-                    });
-                    x += node.value.width;
-                }
-                else if (node.value.type === 'glue') {
-                    x += node.value.width + line.ratio * (line.ratio < 0 ? node.value.shrink : node.value.stretch);
-                }
-                else if (node.value.type === 'penalty' && node.value.penalty === 100 && index === array.length - 1) {
-                    text_nodes.push({
-                        type: 'text',
-                        x: x_ + x_offset + x_indent,
-                        y: y_ + y_offset,
-                        span: node.style,
-                        text: '-',
-                    });
-                }
-            });
+            var lineTextNodes = nodesLineToTextNodes(measures, line, current_bbox.x + x_indent, current_bbox.y + y);
+            text_nodes = text_nodes.concat(lineTextNodes);
         });
         for (var index = 0; index < current_bbox_index; index++) {
             rendered_bboxes.push(bboxes(index));
@@ -1222,10 +1186,11 @@ exports.formats = formats;
 exports.idRenderer = idRenderer;
 exports.jsPdfDocMeasures = jsPdfDocMeasures;
 exports.landscape = landscape;
+exports.nodesLineToTextNodes = nodesLineToTextNodes;
 exports.pageBreak = pageBreak;
+exports.paragraphToNodesLines = paragraphToNodesLines;
 exports.pdfKitDocMeasures = pdfKitDocMeasures;
 exports.renderColumns = renderColumns;
-exports.renderNodesLine = renderNodesLine;
 exports.renderParagraph = renderParagraph;
 exports.renderPolygon = renderPolygon;
 exports.renderTable = renderTable;
