@@ -15,6 +15,9 @@ import * as F from './typeset/Formatter';
 
 export * from './Types';
 
+import * as columns from './Columns';
+export { columns };
+
 // Combinators -------------------------------------------------------------------- 
 
 export function combine(renderers: [(bbox: T.BBox) => T.BBox, T.Renderer][]): T.Renderer {
@@ -235,6 +238,33 @@ export function nodesLineToTextNodes(measures: T.Measures, line: T.NodesLine, x_
     });
 
     return text_nodes;
+}
+
+export function paragraphsToTextNodes(measures: T.Measures, pars: T.Paragraph[], getLineWidth: (text_y: number, line: number) => number) {
+	var rPars: T.RenderNode[][][] = [];
+	var pcount = pars.length;
+	for (var i = 0; i < pcount; i++) {
+		var par = pars[i];
+		var nls = paragraphToNodesLines(measures, par, getLineWidth);
+		var rLines: T.RenderNode[][] = [];
+		var lcount = nls.length;
+		for (var j = 0; j < lcount; j++) {
+			var nodesLine = nls[j];
+			var render_line = nodesLineToTextNodes(measures, nodesLine);
+			var rWords: T.RenderNode[] = [];
+			var wcount = render_line.length;
+			for (var k = 0; k < wcount; k++) {
+				var text_node = render_line[k];
+				if ('text' !== text_node.type) continue;
+				var text = text_node.text;
+				if (/^\s*$/.test(text)) continue;
+				rWords.push(text_node);
+			}
+			rLines.push(rWords);
+		}
+		rPars.push(rLines);
+	}
+	return rPars;
 }
 
 // TODO: letter spacing
