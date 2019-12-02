@@ -760,7 +760,8 @@ function getCutsHeight(rPars, getIndexHeight, lHeight, pMargin) {
 			cuts.push([i, 0, y, y]);
 			cutHeight = getIndexHeight(cuts.length);
 		} else if (y + py > cutHeight) {
-			var lBefore = Math.floor(py / lHeight);
+			// py / lHeight
+			var lBefore = Math.floor((cutHeight - y) / lHeight);
 			var lAfter = lCount - lBefore;
 			y = lAfter ? lAfter * lHeight + pMargin : 0;
 			cuts.push([i, lBefore, y, lBefore * lHeight + y]);
